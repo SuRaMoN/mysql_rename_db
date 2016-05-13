@@ -38,3 +38,14 @@ It will create the database and rename everything to the new database, at the en
  * triggers
  * tables
  * views
+
+RPM
+===
+
+You can create a centos/redhat RPM for it by running:
+```
+    git clone "https://github.com/SuRaMoN/mysql_rename_db.git"
+    cd mysql_rename_db
+    make rpm
+```
+The creation of the rpm works on both debian bases systems and redhat based systems.
