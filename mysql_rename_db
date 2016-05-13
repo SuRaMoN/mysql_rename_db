@@ -1,0 +1,74 @@
+#!/bin/bash
+# Copyright 2013 Percona LLC and/or its affiliates
+
+set -e
+
+OLD_DATABASE="${@: -2:1}"
+NEW_DATABASE="${@: -1:1}"
+
+OPTIONS=("${@:1:(($#-2))}")
+
+if [ -z "$NEW_DATABASE" ]; then
+    echo "rename_db [mysql-options] <database> <new_database>"
+    exit 1
+fi
+db_exists=`mysql "${OPTIONS[@]}" -e "show databases like '$NEW_DATABASE'" -sss`
+if [ -n "$db_exists" ]; then
+    echo "ERROR: New database already exists $NEW_DATABASE"
+    exit 1
+fi
+TIMESTAMP=`date +%s`
+CHARACTER_SET="$(mysql "${OPTIONS[@]}" -e "show create database $OLD_DATABASE" -sss | sed -E -e 's/.*DEFAULT CHARACTER SET (\w*).*/\1/')"
+TABLES=`mysql "${OPTIONS[@]}" -e "select TABLE_NAME from information_schema.tables where table_schema='$OLD_DATABASE' and TABLE_TYPE='BASE TABLE'" -sss`
+STATUS=$?
+if [ "$STATUS" != 0 ] || [ -z "$TABLES" ]; then
+    echo "Error retrieving tables from $OLD_DATABASE"
+    exit 1
+fi
+echo "create database $NEW_DATABASE DEFAULT CHARACTER SET $CHARACTER_SET"
+mysql "${OPTIONS[@]}" -e "create database $NEW_DATABASE DEFAULT CHARACTER SET $CHARACTER_SET"
+TRIGGERS=`mysql "${OPTIONS[@]}" $OLD_DATABASE -e "show triggers" | grep Trigger: | awk '{print $OLD_DATABASE}'`
+VIEWS=`mysql "${OPTIONS[@]}" -e "select TABLE_NAME from information_schema.tables where table_schema='$OLD_DATABASE' and TABLE_TYPE='VIEW'" -sss`
+if [ -n "$VIEWS" ]; then
+    mysqldump "${OPTIONS[@]}" $OLD_DATABASE $VIEWS > /tmp/${2}_views${TIMESTAMP}.dump
+fi
+mysqldump "${OPTIONS[@]}" $OLD_DATABASE -d -t -R -E > /tmp/${2}_triggers${TIMESTAMP}.dump
+for TRIGGER in $TRIGGERS; do
+    echo "drop trigger $TRIGGER"
+    mysql "${OPTIONS[@]}" $OLD_DATABASE -e "drop trigger $TRIGGER"
+done
+for TABLE in $TABLES; do
+    echo "rename table $OLD_DATABASE.$TABLE to $NEW_DATABASE.$TABLE"
+    mysql "${OPTIONS[@]}" $OLD_DATABASE -e "SET FOREIGN_KEY_CHECKS=0; rename table $OLD_DATABASE.$TABLE to $NEW_DATABASE.$TABLE"
+done
+if [ -n "$VIEWS" ]; then
+    echo "loading views"
+    mysql "${OPTIONS[@]}" $NEW_DATABASE < /tmp/${2}_views${TIMESTAMP}.dump
+fi
+echo "loading triggers, routines and events"
+mysql "${OPTIONS[@]}" $NEW_DATABASE < /tmp/${2}_triggers${TIMESTAMP}.dump
+TABLES=`mysql "${OPTIONS[@]}" -e "select TABLE_NAME from information_schema.tables where table_schema='$OLD_DATABASE' and TABLE_TYPE='BASE TABLE'" -sss`
+if [ -z "$TABLES" ]; then
+    echo "Dropping database $OLD_DATABASE"
+    mysql "${OPTIONS[@]}" $OLD_DATABASE -e "drop database $OLD_DATABASE"
+fi
+if [ `mysql "${OPTIONS[@]}" -e "select count(*) from mysql.columns_priv where db='$OLD_DATABASE'" -sss` -gt 0 ]; then
+    COLUMNS_PRIV="    UPDATE mysql.columns_priv set db='$NEW_DATABASE' WHERE db='$OLD_DATABASE';"
+fi
+if [ `mysql "${OPTIONS[@]}" -e "select count(*) from mysql.procs_priv where db='$OLD_DATABASE'" -sss` -gt 0 ]; then
+    PROCS_PRIV="    UPDATE mysql.procs_priv set db='$NEW_DATABASE' WHERE db='$OLD_DATABASE';"
+fi
+if [ `mysql "${OPTIONS[@]}" -e "select count(*) from mysql.tables_priv where db='$OLD_DATABASE'" -sss` -gt 0 ]; then
+    TABLES_PRIV="    UPDATE mysql.tables_priv set db='$NEW_DATABASE' WHERE db='$OLD_DATABASE';"
+fi
+if [ `mysql "${OPTIONS[@]}" -e "select count(*) from mysql.db where db='$OLD_DATABASE'" -sss` -gt 0 ]; then
+    DB_PRIV="    UPDATE mysql.db set db='$NEW_DATABASE' WHERE db='$OLD_DATABASE';"
+fi
+if [ -n "$COLUMNS_PRIV" ] || [ -n "$PROCS_PRIV" ] || [ -n "$TABLES_PRIV" ] || [ -n "$DB_PRIV" ]; then
+    echo "IF YOU WANT TO RENAME the GRANTS YOU NEED TO RUN ALL OUTPUT BELOW:"
+    if [ -n "$COLUMNS_PRIV" ]; then echo "$COLUMNS_PRIV"; fi
+    if [ -n "$PROCS_PRIV" ]; then echo "$PROCS_PRIV"; fi
+    if [ -n "$TABLES_PRIV" ]; then echo "$TABLES_PRIV"; fi
+    if [ -n "$DB_PRIV" ]; then echo "$DB_PRIV"; fi
+    echo "    flush privileges;"
+fi 
