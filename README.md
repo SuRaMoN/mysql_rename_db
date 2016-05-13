@@ -2,14 +2,14 @@
 About
 =====
 
-It's a dirty bash script to rename a database on a server (no support for moving it to another server). It is originally written by the Percona DB Team but it has some tweaks and fixes. It only works on systems with bash installed.
+It's a dirty bash script to rename a database on a server (no support for moving it to another server). It is originally written by the Percona DBA Team but it has some tweaks and fixes. It only works on systems with bash installed.
 
 Install instructions
 ====================
 
 Just download the file mysql_rename_db and give it appropriate rights:
 ```
-    wget "https://raw.githubusercontent.com/SuRaMoN/mysql_rename_db/master/mysql_rename_db.sh"
+    wget "https://raw.githubusercontent.com/SuRaMoN/mysql_rename_db/master/mysql_rename_db"
     chmod a+x mysql_rename_db
 ```
 
